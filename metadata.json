@@ -1,0 +1,6 @@
+{
+  "name": "RM taxi",
+  "description": "A modern taxi booking service with real-time map tracking and service selection.",
+  "requestFramePermissions": ["geolocation", "microphone"],
+  "majorCapabilities": []
+}
