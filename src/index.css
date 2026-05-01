@@ -23,8 +23,6 @@ body {
   width: 100%;
   height: 100vh;
   z-index: 0;
-  filter: grayscale(1) contrast(1.2) brightness(1.1);
-  opacity: 0.8;
 }
 
 .leaflet-control-zoom {
@@ -41,4 +39,13 @@ body {
 
 .leaflet-control-attribution {
   display: none !important;
+}
+
+/* Smooth Marker Transitions */
+.leaflet-marker-icon {
+  transition: transform 0.1s linear;
+}
+
+.leaflet-marker-shadow {
+  transition: transform 0.1s linear;
 }
