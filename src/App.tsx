@@ -24,7 +24,15 @@ import {
   Search,
   Wifi,
   Activity,
-  User
+  User,
+  Baby,
+  Briefcase,
+  PawPrint,
+  Heart,
+  Home,
+  Plus,
+  Trash2,
+  Minus
 } from 'lucide-react';
 import L from 'leaflet';
 
@@ -200,6 +208,20 @@ export default function App() {
   const [cancellationHistory, setCancellationHistory] = useState<any[]>([]);
   const [mapFiltersEnabled, setMapFiltersEnabled] = useState(true);
   const [rideStatus, setRideStatus] = useState<'searching' | 'arriving' | 'on_way' | 'arrived' | 'completed'>('searching');
+  const [selectedExtras, setSelectedExtras] = useState<{ id: string, quantity: number, details?: string }[]>([]);
+  
+  const [favoriteLocations, setFavoriteLocations] = useState<{ id: string, name: string, address: string, type: 'home' | 'work' | 'other' }[]>([
+    { id: 'fav-1', name: 'Uy', address: 'Shimoliy kichik tuman, 4-uy', type: 'home' },
+    { id: 'fav-2', name: 'Ish', address: 'Namangan City Mall', type: 'work' },
+  ]);
+  const [savingFavorite, setSavingFavorite] = useState(false);
+  const [newFavName, setNewFavName] = useState('');
+  
+  const EXTRA_SERVICES = [
+    { id: 'child_seat', label: 'Bolalar o\'rindig\'i', price: 5000, icon: <Baby size={16} />, hasQuantity: true, max: 3 },
+    { id: 'extra_luggage', label: 'Katta yukxona', price: 3000, icon: <Briefcase size={16} />, hasDetails: true, detailPlaceholder: 'Yuklar o\'lchami (sm)' },
+    { id: 'pet_transport', label: 'Uy hayvoni', price: 7000, icon: <PawPrint size={16} /> },
+  ];
   
   // History Filters
   const [showTraffic, setShowTraffic] = useState(true);
@@ -417,51 +439,85 @@ export default function App() {
       let dPickup = '';
       let dDestination = '';
 
-      // Natural language parsing for Uzbek
-      // Pattern 1: [Pickup]dan [Destination]ga
-      const fromToMatch = transcript.match(/(.+?)\s*dan\s+(.+?)\s*[gk]a/);
-      // Pattern 2: [Destination]ga [Pickup]dan
-      const toFromMatch = transcript.match(/(.+?)\s*[gk]a\s+(.+?)\s*dan/);
-      // Pattern 3: Manzil [Destination]
-      const manzilMatch = transcript.match(/manzil\s+(.+)/);
-      // Pattern 4: [Destination]ga boramiz / olib bor
-      const directDestMatch = transcript.match(/(.+?)\s*[gk]a\s+(boramiz|olib bor|taksi)/);
+      // Natural language parsing for Uzbek - Enhanced
       
+      // Pattern 1: [Pickup]-dan [Destination]-[ga/ka/qa/va] (e.g. Aeroportdan Chorsuga)
+      const fromToMatch = transcript.match(/(.+?)\s*dan\s+(.+?)\s*([gkqv]a)/);
+      // Pattern 2: [Destination]-[ga/ka/qa/va] [Pickup]-dan (e.g. Chorsuga Aeroportdan)
+      const toFromMatch = transcript.match(/(.+?)\s*([gkqv]a)\s+(.+?)\s*dan/);
+      
+      // Pattern 3: Destination specific triggers
+      const destPatterns = [
+        /boradigan\s+manzil(im)?\s+(.+)/,
+        /manzil(im)?\s+(.+)/,
+        /(.+?)\s*([gkqv]a)\s+(boramiz|olib bor|tashlab qo'y|ketdik|hayda)/,
+        /meni\s+(.+?)\s*([gkqv]a)\s+(boramiz|olib bor|tashlab qo'y)/
+      ];
+
+      // Pattern 4: Pickup specific triggers
+      const pickupPatterns = [
+        /meni\s+(.+?)\s*dan\s+(olib ket|turibman)/,
+        /men\s+(.+?)\s*daman/,
+        /turgan\s+joy(im)?\s+(.+?)\s*dan/,
+        /hozirgi\s+joy(im)?\s+(.+?)\s*da/
+      ];
+
       if (fromToMatch) {
         dPickup = fromToMatch[1].trim();
         dDestination = fromToMatch[2].trim();
       } else if (toFromMatch) {
         dDestination = toFromMatch[1].trim();
-        dPickup = toFromMatch[2].trim();
-      } else if (manzilMatch) {
-        dDestination = manzilMatch[1].trim();
-      } else if (directDestMatch) {
-        dDestination = directDestMatch[1].trim();
+        dPickup = toFromMatch[3].trim();
       } else {
-        // Individual extracts if combined patterns fail
-        const pMatch = transcript.match(/(.+?)\s*dan/);
-        const dMatch = transcript.match(/(.+?)\s*[gk]a/);
+        // Search for destination in patterns
+        for (const pattern of destPatterns) {
+          const match = transcript.match(pattern);
+          if (match) {
+            dDestination = (match.length > 2 ? match[2] : match[1]).trim();
+            break;
+          }
+        }
         
-        if (dMatch && !pMatch) {
-          dPickup = "Hozirgi joylashuv";
-          dDestination = dMatch[1].trim();
-        } else {
-          if (pMatch) dPickup = pMatch[1].trim();
-          if (dMatch) dDestination = dMatch[1].trim();
+        // Search for pickup in patterns
+        for (const pattern of pickupPatterns) {
+          const match = transcript.match(pattern);
+          if (match) {
+            dPickup = (match.length > 2 ? match[1] : match[1]).trim();
+            // Handle "men ... daman" special case where capture is correct but index might differ
+            if (pattern.toString().includes('daman')) dPickup = match[1].trim();
+            break;
+          }
+        }
+
+        // Catch-all fallbacks
+        if (!dPickup && !dDestination) {
+          const pMatch = transcript.match(/(.+?)\s*dan/);
+          const dMatch = transcript.match(/(.+?)\s*([gkqv]a)/);
+          
+          if (dMatch && !pMatch) {
+            dPickup = "Hozirgi joylashuv";
+            dDestination = dMatch[1].trim();
+          } else {
+            if (pMatch) dPickup = pMatch[1].trim();
+            if (dMatch) dDestination = dMatch[1].trim();
+          }
         }
       }
 
-      if (dPickup) setPickup(dPickup);
+      // Cleanup common Uzbek filler words and redundant phrases
+      const cleanLocation = (loc: string) => {
+        return loc
+          .replace(/^(meni|bizni)\s+/, '')
+          .replace(/\s+(manzilim|joyim)$/, '')
+          .replace(/^(boradigan|turgan)\s+/, '')
+          .trim();
+      };
+
+      if (dPickup) setPickup(cleanLocation(dPickup));
       if (dDestination) {
-        setDestination(dDestination);
+        setDestination(cleanLocation(dDestination));
         // We set a flag to pick the first result automatically if it was voice triggered
         (window as any)._voiceTriggered = true;
-      }
-
-      // Handle specific commands
-      if (transcript.includes('meni') && transcript.includes('dan olib ket')) {
-        const takeMeMatch = transcript.match(/meni\s+(.+?)\s*dan/);
-        if (takeMeMatch) setPickup(takeMeMatch[1].trim());
       }
 
       // Tier selection
@@ -612,6 +668,13 @@ export default function App() {
       return (val * (1 - discount)).toFixed(1);
     }
     return base;
+  };
+
+  const getExtrasTotal = () => {
+    return selectedExtras.reduce((acc, extra) => {
+      const service = EXTRA_SERVICES.find(s => s.id === extra.id);
+      return acc + ((service?.price || 0) * (extra.quantity || 1));
+    }, 0);
   };
 
   useEffect(() => {
@@ -968,6 +1031,7 @@ export default function App() {
     setCurrentRating(0);
     setRideReview("");
     setRideStatus('searching');
+    setSelectedExtras([]);
   };
 
   const skipRating = () => {
@@ -1008,23 +1072,25 @@ export default function App() {
     setCurrentRating(0);
     setRideReview("");
     setRideStatus('searching');
+    setSelectedExtras([]);
   };
 
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 1, 18));
   const handleZoomOut = () => setZoom(prev => Math.max(prev - 1, 3));
 
-  const handleSendMessage = () => {
-    if (!chatInput.trim()) return;
+  const handleSendMessage = (text?: string) => {
+    const messageText = text || chatInput;
+    if (!messageText.trim()) return;
 
     const newMessage = {
       id: Date.now(),
-      text: chatInput.trim(),
+      text: messageText.trim(),
       sender: 'user',
       time: new Date().toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' })
     };
 
     setChatMessages(prev => [...prev, newMessage]);
-    setChatInput('');
+    if (!text) setChatInput('');
 
     // Simulate driver response
     setTimeout(() => {
@@ -1201,6 +1267,49 @@ export default function App() {
                     </motion.button>
                     <span className="bg-zinc-100 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-zinc-400">Namangan</span>
                   </div>
+                </div>
+
+                {/* Favorite Locations Section */}
+                <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 mb-6">
+                  {favoriteLocations.map((fav) => (
+                    <motion.button
+                      key={fav.id}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setDestination(fav.address)}
+                      className="flex items-center gap-2 px-3 py-2 bg-white border border-zinc-100 rounded-xl shadow-sm hover:border-zinc-300 transition-all shrink-0"
+                    >
+                      <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${
+                        fav.type === 'home' ? 'bg-blue-50 text-blue-600' : 
+                        fav.type === 'work' ? 'bg-purple-50 text-purple-600' : 'bg-red-50 text-red-600'
+                      }`}>
+                        {fav.type === 'home' ? <Home size={12} /> : 
+                         fav.type === 'work' ? <Briefcase size={12} /> : <Heart size={12} />}
+                      </div>
+                      <div className="text-left">
+                        <p className="text-[10px] font-black uppercase tracking-tight leading-none mb-0.5">{fav.name}</p>
+                        <p className="text-[8px] font-bold text-zinc-400 truncate max-w-[80px]">{fav.address}</p>
+                      </div>
+                    </motion.button>
+                  ))}
+                  <button 
+                    onClick={() => {
+                      if (destination) {
+                        setNewFavName('');
+                        setSavingFavorite(true);
+                      } else {
+                        // Simple notification or feedback could go here
+                      }
+                    }}
+                    className={`flex items-center gap-2 px-3 py-2 border rounded-xl transition-all shrink-0 ${
+                      destination 
+                        ? 'bg-zinc-900 border-zinc-900 text-white hover:bg-zinc-800' 
+                        : 'bg-zinc-50 border-zinc-100 border-dashed text-zinc-400 opacity-50 cursor-not-allowed'
+                    }`}
+                  >
+                    <Plus size={14} />
+                    <span className="text-[10px] font-black uppercase tracking-widest">Saqlash</span>
+                  </button>
                 </div>
 
                 <div className="space-y-4 mb-8">
@@ -1408,6 +1517,112 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Extra Services Section */}
+                <div className="mb-8">
+                  <div className="flex items-center justify-between mb-3 px-1">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Qo'shimcha xizmatlar</span>
+                    {selectedExtras.length > 0 && (
+                      <span className="text-[9px] font-black uppercase bg-[#FFD600] text-zinc-900 px-2 py-0.5 rounded-full tracking-widest">
+                        +{getExtrasTotal().toLocaleString()} so'm
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-4 overflow-x-auto no-scrollbar pb-4 -mx-1 px-1">
+                    {EXTRA_SERVICES.map((service) => {
+                      const selectedExtra = selectedExtras.find(e => e.id === service.id);
+                      const isSelected = !!selectedExtra;
+                      
+                      return (
+                        <div key={`extra-service-group-${service.id}`} className="flex flex-col gap-2 shrink-0">
+                          <motion.button
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => {
+                              setSelectedExtras(prev => 
+                                isSelected 
+                                  ? prev.filter(e => e.id !== service.id) 
+                                  : [...prev, { id: service.id, quantity: 1, details: '' }]
+                              );
+                            }}
+                            className={`flex items-center gap-3 p-3 rounded-2xl border-2 transition-all min-w-[165px] h-[60px] ${
+                              isSelected 
+                                ? 'bg-zinc-900 text-white border-zinc-900 shadow-md' 
+                                : 'bg-zinc-50 text-zinc-500 border-zinc-100 hover:border-zinc-200'
+                            }`}
+                          >
+                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isSelected ? 'bg-[#FFD600] text-zinc-900' : 'bg-white text-zinc-400 shadow-sm'}`}>
+                              {service.icon}
+                            </div>
+                            <div className="text-left overflow-hidden">
+                              <p className="text-[10px] font-black uppercase tracking-tight leading-none mb-1 truncate">{service.label}</p>
+                              <p className={`text-[9px] font-bold ${isSelected ? 'text-[#FFD600]' : 'text-zinc-400'}`}>+{service.price.toLocaleString()}</p>
+                            </div>
+                            {isSelected && <Check size={12} className="text-[#FFD600] ml-auto shrink-0" />}
+                          </motion.button>
+                          
+                          <AnimatePresence>
+                            {isSelected && (service.hasQuantity || service.hasDetails) && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0, y: -10 }}
+                                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                                exit={{ opacity: 0, height: 0, y: -10 }}
+                                className="bg-white rounded-xl border border-zinc-100 shadow-sm overflow-hidden"
+                              >
+                                <div className="p-2 space-y-2">
+                                  {service.hasQuantity && (
+                                    <div className="flex items-center justify-between gap-2 bg-zinc-50 p-1.5 rounded-lg">
+                                      <span className="text-[8px] font-black uppercase text-zinc-400 ml-1">Soni</span>
+                                      <div className="flex items-center gap-2">
+                                        <button 
+                                          onClick={() => {
+                                            setSelectedExtras(prev => prev.map(e => 
+                                              e.id === service.id ? { ...e, quantity: Math.max(1, e.quantity - 1) } : e
+                                            ));
+                                          }}
+                                          className="w-5 h-5 bg-white border border-zinc-200 rounded-md flex items-center justify-center text-zinc-600 active:scale-95"
+                                        >
+                                          <Minus size={10} />
+                                        </button>
+                                        <span className="text-xs font-black text-zinc-900 w-3 text-center">{selectedExtra.quantity}</span>
+                                        <button 
+                                          onClick={() => {
+                                            setSelectedExtras(prev => prev.map(e => 
+                                              e.id === service.id ? { ...e, quantity: Math.min(service.max || 1, e.quantity + 1) } : e
+                                            ));
+                                          }}
+                                          className="w-5 h-5 bg-[#FFD600] rounded-md flex items-center justify-center text-zinc-900 active:scale-95"
+                                        >
+                                          <Plus size={10} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                  
+                                  {service.hasDetails && (
+                                    <div className="relative">
+                                      <input
+                                        type="text"
+                                        placeholder={service.detailPlaceholder}
+                                        value={selectedExtra.details || ''}
+                                        onChange={(e) => {
+                                          setSelectedExtras(prev => prev.map(ex => 
+                                            ex.id === service.id ? { ...ex, details: e.target.value } : ex
+                                          ));
+                                        }}
+                                        className="w-full px-2 py-2 bg-zinc-50 border border-zinc-100 rounded-lg text-[9px] font-bold text-zinc-900 placeholder:text-zinc-300 outline-none focus:ring-1 focus:ring-zinc-900 transition-all"
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between mb-8 px-2">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-6 bg-zinc-100 rounded-md flex items-center justify-center font-black text-[9px] border border-zinc-200 tracking-tighter">{paymentMethod}</div>
@@ -1423,11 +1638,24 @@ export default function App() {
 
                 <button
                   onClick={handleOrder}
-                  className={`w-full py-5 rounded-2xl text-black font-black text-xl uppercase tracking-tighter transition-all ${
+                  className={`w-full py-5 rounded-2xl text-black font-black text-xl uppercase tracking-tighter transition-all flex items-center justify-center gap-3 ${
                     destination.trim() ? 'bg-[#FFD600] shadow-xl shadow-yellow-200' : 'bg-zinc-100 text-zinc-300'
                   }`}
                 >
-                  Taxsi Buyurtma Qilish
+                  <span>Taxsi Buyurtma Qilish</span>
+                  {destination.trim() && (
+                    <span className="bg-zinc-950 text-[#FFD600] px-3 py-1 rounded-lg text-sm italic">
+                      {(
+                        (parseFloat(getPrice({
+                          economy: "12.5",
+                          comfort: "18.0",
+                          business: "32.0",
+                          minivan: "25.0",
+                          cargo: "45.0"
+                        }[activeTier as 'economy' | 'comfort' | 'business' | 'minivan' | 'cargo'] || "12.5")) * 1000) + getExtrasTotal()
+                      ).toLocaleString()}
+                    </span>
+                  )}
                 </button>
               </div>
             </motion.div>
@@ -1745,74 +1973,72 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="flex flex-col gap-6 p-6 bg-zinc-50 rounded-3xl border border-zinc-100 shadow-sm relative overflow-hidden">
+                      <div className="p-6 bg-zinc-50 rounded-3xl border border-zinc-100 shadow-sm relative overflow-hidden">
                         <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
                           <User size={120} />
                         </div>
                         
-                        <div className="flex items-center gap-6">
-                          <div className="w-24 h-24 bg-white p-1 rounded-3xl shadow-xl shadow-zinc-200/50 relative">
+                        <div className="flex items-center gap-6 mb-6">
+                          <div className="w-24 h-24 bg-white p-1 rounded-3xl shadow-xl shadow-zinc-200/50 relative shrink-0">
                             <div className="w-full h-full rounded-2xl overflow-hidden bg-zinc-100 flex items-center justify-center">
                                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedHistoryRide.driver.name}`} alt="Driver" className="w-full h-full object-cover" />
                             </div>
-                            <div className="absolute -bottom-2 -right-2 bg-[#FFD600] text-zinc-900 px-2 py-0.5 rounded-lg text-[10px] font-black italic shadow-lg border-2 border-white">
+                            <div className="absolute -bottom-2 -right-2 bg-zinc-900 text-[#FFD600] px-2 py-0.5 rounded-lg text-[10px] font-black italic shadow-lg border-2 border-white">
                                 {selectedHistoryRide.type}
                             </div>
                           </div>
                           
-                          <div className="flex-1">
+                          <div>
                             <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest leading-none mb-1">Haydovchi</p>
                             <h3 className="text-2xl font-black italic tracking-tighter text-zinc-900 leading-tight mb-2">{selectedHistoryRide.driver.name}</h3>
                             <div className="flex items-center gap-3">
-                              <div className="flex items-center gap-1 bg-white px-3 py-1 rounded-full border border-zinc-100 shadow-sm">
-                                <Star size={12} fill="#FFD600" className="text-[#FFD600]" />
+                              <div className="flex items-center gap-1 bg-[#FFD600] text-zinc-900 px-3 py-1 rounded-full shadow-sm">
+                                <Star size={12} fill="currentColor" />
                                 <span className="text-sm font-black italic">{selectedHistoryRide.driver.rating}</span>
                               </div>
-                              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
-                                {selectedHistoryRide.driver.rides || "1.2k+"} safarlar
+                              <div className="text-[10px] font-black p-1 px-2 border border-zinc-200 rounded-lg text-zinc-400 uppercase tracking-widest">
+                                {selectedHistoryRide.driver.rides || "1.2k+"} safar
                               </div>
                             </div>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-3 mb-4">
                           <div className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
                             <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1">Avtomobil</p>
                             <p className="text-sm font-black text-zinc-900">{selectedHistoryRide.driver.car}</p>
+                            <p className="text-[10px] font-bold text-zinc-400 uppercase mt-1">{selectedHistoryRide.driver.color}</p>
                           </div>
-                          <div className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
-                            <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1">Rangi</p>
-                            <p className="text-sm font-black text-zinc-900">{selectedHistoryRide.driver.color}</p>
-                          </div>
-                          <div className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm col-span-2 flex items-center justify-between">
-                            <div>
-                              <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1">Davlat raqami</p>
-                              <div className="flex items-center gap-2">
-                                <div className="w-1.5 h-6 bg-blue-600 rounded-sm"></div>
-                                <p className="text-lg font-black tracking-widest text-zinc-900 uppercase">
-                                  {selectedHistoryRide.driver.plate}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex gap-2">
-                               <motion.button 
-                                  whileHover={{ scale: 1.05 }}
-                                  whileTap={{ scale: 0.95 }}
-                                  onClick={(e) => { e.stopPropagation(); window.open(`tel:${selectedHistoryRide.driver.phone || '+998900000000'}`); }}
-                                  className="w-12 h-12 bg-emerald-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-emerald-100"
-                               >
-                                 <Phone size={20} fill="currentColor" />
-                               </motion.button>
-                               <motion.button 
-                                  whileHover={{ scale: 1.05 }}
-                                  whileTap={{ scale: 0.95 }}
-                                  onClick={(e) => { e.stopPropagation(); setIsChatOpen(true); }}
-                                  className="w-12 h-12 bg-[#FFD600] text-black rounded-xl flex items-center justify-center shadow-lg shadow-yellow-100"
-                               >
-                                 <MessageSquare size={20} fill="currentColor" />
-                               </motion.button>
+                          <div className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm flex flex-col justify-center">
+                            <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1">Davlat raqami</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <div className="w-1.5 h-6 bg-blue-600 rounded-sm"></div>
+                              <p className="text-lg font-black tracking-[0.2em] text-zinc-900 uppercase">
+                                {selectedHistoryRide.driver.plate}
+                              </p>
                             </div>
                           </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                           <motion.button 
+                              whileHover={{ scale: 1.02 }}
+                              whileTap={{ scale: 0.98 }}
+                              onClick={(e) => { e.stopPropagation(); window.open(`tel:${selectedHistoryRide.driver.phone || '+998900000000'}`); }}
+                              className="flex-1 py-4 bg-zinc-900 text-[#FFD600] rounded-2xl flex items-center justify-center gap-3 shadow-lg shadow-zinc-200"
+                           >
+                             <Phone size={18} fill="currentColor" />
+                             <span className="text-[10px] font-black uppercase tracking-widest">Qo'ng'iroq</span>
+                           </motion.button>
+                           <motion.button 
+                              whileHover={{ scale: 1.02 }}
+                              whileTap={{ scale: 0.98 }}
+                              onClick={(e) => { e.stopPropagation(); setIsChatOpen(true); }}
+                              className="flex-1 py-4 bg-white text-zinc-900 border border-zinc-200 rounded-2xl flex items-center justify-center gap-3 shadow-sm"
+                           >
+                             <MessageSquare size={18} fill="currentColor" />
+                             <span className="text-[10px] font-black uppercase tracking-widest">Chat</span>
+                           </motion.button>
                         </div>
                       </div>
 
@@ -2187,6 +2413,20 @@ export default function App() {
                     </div>
                   </div>
 
+                  <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2 mb-6">
+                    {["Men chiqdim", "Meni kuting", "Qayerdasiz?", "Hozir boraman"].map((phrase) => (
+                      <motion.button
+                        key={phrase}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => handleSendMessage(phrase)}
+                        className="whitespace-nowrap px-4 py-2 bg-zinc-100 text-zinc-900 rounded-full text-[9px] font-black uppercase tracking-widest border border-zinc-200 hover:bg-zinc-200 transition-colors"
+                      >
+                        {phrase}
+                      </motion.button>
+                    ))}
+                  </div>
+
                   <div className="flex gap-3">
                     <motion.button 
                       whileHover={{ scale: 1.02, y: -2 }}
@@ -2317,8 +2557,20 @@ export default function App() {
               </div>
 
               {/* Chat Input */}
-              <div className="p-4 bg-white border-t border-zinc-100 flex gap-3">
-                <div className="flex-1 relative">
+              <div className="p-4 bg-white border-t border-zinc-100">
+                <div className="flex gap-2 overflow-x-auto no-scrollbar pb-3 mb-1">
+                  {["Men chiqdim", "Meni kuting", "Qayerdasiz?", "Yo'ldaman"].map((phrase) => (
+                    <button
+                      key={`chat-phrase-${phrase}`}
+                      onClick={() => handleSendMessage(phrase)}
+                      className="whitespace-nowrap px-4 py-2 bg-zinc-50 hover:bg-zinc-100 text-zinc-900 rounded-xl text-[9px] font-black uppercase tracking-widest border border-zinc-100 transition-colors"
+                    >
+                      {phrase}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-1 relative">
                   <input 
                     type="text" 
                     value={chatInput}
@@ -2336,8 +2588,81 @@ export default function App() {
                 </div>
               </div>
             </div>
-          </motion.div>
+          </div>
+        </motion.div>
         )}
+
+        {/* Add Favorite Modal */}
+        <AnimatePresence>
+          {savingFavorite && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-6"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                className="bg-white w-full max-w-sm rounded-[40px] overflow-hidden shadow-2xl relative"
+              >
+                <div className="p-8">
+                  <div className="w-16 h-16 bg-zinc-900 rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-zinc-200">
+                    <Heart size={32} className="text-[#FFD600]" fill="currentColor" />
+                  </div>
+                  
+                  <h2 className="text-3xl font-black italic tracking-tighter text-zinc-900 mb-2 leading-none uppercase">Joyni Saqlash</h2>
+                  <p className="text-sm font-bold text-zinc-400 mb-8 max-w-[200px]">Ushbu manzilga qanday nom berasiz?</p>
+                  
+                  <div className="space-y-4 mb-8">
+                    <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                      <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1">Manzil</p>
+                      <p className="text-sm font-bold text-zinc-900 truncate">{destination}</p>
+                    </div>
+                    
+                    <div className="relative">
+                      <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-2 ml-4">Nomlanishi</p>
+                      <input 
+                        type="text" 
+                        value={newFavName}
+                        onChange={(e) => setNewFavName(e.target.value)}
+                        placeholder="Masalan: Uy, Ish, Buvi..."
+                        className="w-full px-6 py-4 bg-zinc-100 border-none rounded-2xl text-sm font-bold placeholder:text-zinc-400 outline-none focus:ring-2 focus:ring-zinc-900 transition-all font-mono"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-3">
+                    <button 
+                      onClick={() => setSavingFavorite(false)}
+                      className="flex-1 py-4 bg-zinc-100 text-zinc-400 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-zinc-200 transition-all"
+                    >
+                      Bekor qilish
+                    </button>
+                    <button 
+                      onClick={() => {
+                        if (newFavName.trim()) {
+                          const newFav = {
+                            id: `fav-${Date.now()}`,
+                            name: newFavName.trim(),
+                            address: destination,
+                            type: 'other' as const
+                          };
+                          setFavoriteLocations(prev => [...prev, newFav]);
+                          setSavingFavorite(false);
+                        }
+                      }}
+                      className="flex-1 py-4 bg-[#FFD600] text-zinc-900 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-yellow-100 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                    >
+                      Saqlash
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Booking Successful Modal */}
         <AnimatePresence>
